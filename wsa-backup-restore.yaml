@@ -1,0 +1,156 @@
+apiVersion: spp-data-protection.isf.ibm.com/v1alpha1
+kind: Recipe
+metadata:
+  name: wsa-backup-restore-test
+  namespace: ibm-spectrum-fusion-ns
+spec:
+  appType: websphere-automation
+  groups:
+    - name: mongodb-volumes
+      type: volume
+###      labelSelector: app.kubernetes.io/component=mongodb ###[can be used to backup the mongo PVC's only]
+    - name: wsa-secure-crypto
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/instance=wsa-secure-crypto
+    - name: restore-wsa-secure-crypto
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-secure-crypto
+    - name: wsa-secure-encrypt
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/instance=wsa-secure-encrypt
+    - name: restore-wsa-secure-encrypt
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-secure-encrypt
+    - name: mongo-secrets
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/component=mongodb
+    - name: restore-mongo-secrets
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: mongo-secrets
+    - name: wsa-mongo-ca-cert
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: custom-label=mongo-ca-cert
+    - name: restore-wsa-mongo-ca-cert
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-mongo-ca-cert
+    - name: wsa-health-webhooks-apis-sa-generated-token
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/component=webhooks-apis
+    - name: restore-wsa-health-webhooks-apis-sa-generated-token
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-health-webhooks-apis-sa-generated-token
+    - name: wsa-secure-metering-apis-sa-generated-token
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/instance=wsa-secure-metering-apis-sa-generated-token
+    - name: restore-wsa-secure-metering-apis-sa-generated-token
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-secure-metering-apis-sa-generated-token
+    - name: wsa-secure-metering-apis-encrypted-tokens
+      type: resource
+      includedResourceTypes:
+        - secret
+      labelSelector: app.kubernetes.io/instance=wsa-secure-metering-apis-encrypted-tokens
+    - name: restore-wsa-secure-metering-apis-encrypted-tokens
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-secure-metering-apis-encrypted-tokens
+    - name: wsa-secure-metering-apis-sa
+      type: resource
+      includedResourceTypes:
+        - serviceaccount
+      labelSelector: app.kubernetes.io/instance=wsa-secure-metering-apis-sa
+    - name: restore-wsa-secure-metering-apis-sa
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-secure-metering-apis-sa
+    - name: wsa-health-webhooks-apis-sa
+      type: resource
+      includedResourceTypes:
+        - serviceaccount
+      labelSelector: app.kubernetes.io/instance=wsa-health-webhooks-apis-sa
+    - name: restore-wsa-health-webhooks-apis-sa
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: wsa-health-webhooks-apis-sa
+    - name: websphere-automation-operator-sa
+      type: resource
+      includedNamespaces:
+        - openshift-operators
+      includedResourceTypes:
+        - serviceaccount
+      labelSelector: operators.coreos.com/ibm-websphere-automation.openshift-operators=
+    - name: restore-websphere-automation-operator-sa
+      restoreOverwriteResources: true
+      type: resource
+      backupRef: websphere-automation-operator-sa
+  hooks:
+    - name: mongodb-exec
+      nameSelector: wsa-mongo-0
+      namespace: websphere-automation
+      onError: fail
+      ops:
+###  Replace username/password in this section with creds stored in the wsa-mongo-admin-creds secret in the wsa instance namespace
+        - command: >
+            ["/bin/bash", "-c", "mongo --tls --host wsa-mongo --host localhost --username FqO1ANW5ewOgMKVy --password bEvlDtQ78C7BN01eAzFN3Nr6RlN3mY9c --tlsCAFile /data/configdb/tls.crt --eval \"db.fsyncLock()\""]
+          container: mongo
+          name: fsyncLock
+          onError: fail
+          timeout: 300
+        - command: >
+            ["/bin/bash", "-c", "mongo --tls --host wsa-mongo --host localhost --username FqO1ANW5ewOgMKVy --password bEvlDtQ78C7BN01eAzFN3Nr6RlN3mY9c --tlsCAFile /data/configdb/tls.crt --eval \"db.fsyncUnlock()\""]
+          container: mongo
+          name: fsyncUnlock
+          onError: fail
+          timeout: 300
+      selectResource: pod
+      timeout: 300
+      type: exec
+  workflows:
+    - failOn: any-error
+      name: backup
+      sequence:
+        - hook: mongodb-exec/fsyncLock
+        - group: mongodb-volumes
+        - hook: mongodb-exec/fsyncUnlock
+        - group: wsa-secure-crypto
+        - group: wsa-secure-encrypt
+        - group: mongo-secrets
+        - group: wsa-mongo-ca-cert
+        - group: wsa-health-webhooks-apis-sa-generated-token
+        - group: wsa-secure-metering-apis-sa-generated-token
+        - group: wsa-secure-metering-apis-encrypted-tokens
+        - group: wsa-secure-metering-apis-sa
+        - group: wsa-health-webhooks-apis-sa
+        - group: websphere-automation-operator-sa
+    - failOn: any-error
+      name: restore
+      sequence:
+        - group: mongodb-volumes
+        - group: restore-wsa-secure-crypto
+        - group: restore-wsa-secure-encrypt
+        - group: restore-mongo-secrets
+        - group: restore-wsa-mongo-ca-cert
+        - group: restore-wsa-health-webhooks-apis-sa-generated-token
+        - group: restore-wsa-secure-metering-apis-sa-generated-token
+        - group: restore-wsa-secure-metering-apis-encrypted-tokens
+        - group: restore-wsa-secure-metering-apis-sa
+        - group: restore-wsa-health-webhooks-apis-sa
+        - group: restore-websphere-automation-operator-sa
